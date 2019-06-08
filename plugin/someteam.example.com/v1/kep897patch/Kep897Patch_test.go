@@ -35,10 +35,11 @@ apiVersion: someteam.example.com/v1
 kind: Kep897Patch
 metadata:
   name: notImportantHere
-path: deployment-patch.yaml
-target:
-  kind: Deployment
-type: StrategicMergePatch
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+  type: StrategicMergePatch
 `, `
 apiVersion: apps/v1
 kind: Deployment
@@ -86,6 +87,97 @@ spec:
 `)
 }
 
+func TestKep897PatchMultiple(t *testing.T) {
+	tc := plugin.NewEnvForTest(t).Set()
+	defer tc.Reset()
+
+	tc.BuildGoPlugin(
+		"someteam.example.com", "v1", "Kep897Patch")
+
+	th := kusttest_test.NewKustTestPluginHarness(t, "/app")
+	th.WriteF("/app/deployment-patch.yaml", `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notImportantHere
+spec:
+  template:
+    spec:
+      nodeSelector:
+        type: prod
+`)
+	th.WriteF("/app/pod-patch.yaml", `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notImportantHere
+spec:
+  nodeSelector:
+    type: prod
+`)
+	rm := th.LoadAndRunTransformer(`
+apiVersion: someteam.example.com/v1
+kind: Kep897Patch
+metadata:
+  name: notImportantHere
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+  type: StrategicMergePatch
+- path: pod-patch.yaml
+  target:
+    kind: Pod
+  type: StrategicMergePatch
+`, `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  template:
+    spec:
+      containers:
+      - image: elasticsearch
+        name: elasticsearch
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: elasticsearch
+spec:
+  containers:
+  - image: elasticsearch
+    name: elasticsearch
+`)
+
+	th.AssertActualEqualsExpected(rm, `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  template:
+    spec:
+      containers:
+      - image: elasticsearch
+        name: elasticsearch
+      nodeSelector:
+        type: prod
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: elasticsearch
+spec:
+  containers:
+  - image: elasticsearch
+    name: elasticsearch
+  nodeSelector:
+    type: prod
+`)
+}
+
 func TestKep897PatchLabels(t *testing.T) {
 	tc := plugin.NewEnvForTest(t).Set()
 	defer tc.Reset()
@@ -110,12 +202,13 @@ apiVersion: someteam.example.com/v1
 kind: Kep897Patch
 metadata:
   name: notImportantHere
-path: deployment-patch.yaml
-target:
-  kind: Deployment
-  LabelSelector:
-    env: prod
-type: StrategicMergePatch
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    LabelSelector:
+      env: prod
+  type: StrategicMergePatch
 `, `
 apiVersion: apps/v1
 kind: Deployment
@@ -195,12 +288,13 @@ apiVersion: someteam.example.com/v1
 kind: Kep897Patch
 metadata:
   name: notImportantHere
-path: deployment-patch.yaml
-target:
-  kind: Deployment
-  matchAnnotations:
-    env: prod
-type: StrategicMergePatch
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    matchAnnotations:
+      env: prod
+  type: StrategicMergePatch
 `, `
 apiVersion: apps/v1
 kind: Deployment
@@ -283,16 +377,17 @@ apiVersion: someteam.example.com/v1
 kind: Kep897Patch
 metadata:
   name: notImportantHere
-path: deployment-patch.yaml
-target:
-  kind: Deployment
-  group: apps
-  version: v1
-  labelSelector:
-    env: prod
-  matchAnnotations:
-    istio: enabled
-type: StrategicMergePatch
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    group: apps
+    version: v1
+    labelSelector:
+      env: prod
+    matchAnnotations:
+      istio: enabled
+  type: StrategicMergePatch
 `, `
 apiVersion: apps/v1
 kind: Deployment
@@ -468,10 +563,11 @@ apiVersion: someteam.example.com/v1
 kind: Kep897Patch
 metadata:
   name: notImportantHere
-path: deployment-patch.yaml
-target:
-  kind: Deployment
-type: JsonPatch
+patches:
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+  type: JsonPatch
 `, `
 apiVersion: apps/v1
 kind: Deployment

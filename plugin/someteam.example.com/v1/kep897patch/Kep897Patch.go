@@ -16,6 +16,13 @@ import (
 )
 
 type plugin struct {
+	Patches []Patch `json:"patches"`
+
+	ldr ifc.Loader
+	rf  *resmap.Factory
+}
+
+type Patch struct {
 	// Path is a relative file path to the patch file.
 	Path string `json:"path,omitempty"`
 
@@ -24,9 +31,6 @@ type plugin struct {
 
 	// Type is one of `StrategicMergePatch` or `JsonPatch`
 	Type string `json:"type,omitempty"`
-
-	ldr ifc.Loader
-	rf  *resmap.Factory
 }
 
 // PatchTarget specifies a set of resources
@@ -57,33 +61,39 @@ var KustomizePlugin plugin
 
 func (p *plugin) Config(
 	ldr ifc.Loader, rf *resmap.Factory, c []byte) (err error) {
-	p.Path = ""
-	p.Target = PatchTarget{}
-	p.Type = ""
+	p.Patches = nil
 	p.ldr = ldr
 	p.rf = rf
 	return yaml.Unmarshal(c, p)
 }
 
 func (p *plugin) Transform(m resmap.ResMap) error {
-	if p.Type != "StrategicMergePatch" {
-		return errors.New(fmt.Sprintf("StrategicMergePatch is the only supported patch type, \"%s\" given", p.Type))
+	for _, patch := range p.Patches {
+		if patch.Type != "StrategicMergePatch" {
+			return errors.New(fmt.Sprintf("StrategicMergePatch is the only supported patch type, \"%s\" given", patch.Type))
+		}
+
+		matchingMap := getMatchingResources(m, patch.Target)
+		if matchingMap.Size() < 1 {
+			return fmt.Errorf("0 resources matching %v", patch.Target)
+		}
+
+		patchTemplate, err := loadPatchTemplate(p, patch)
+
+		if err != nil {
+			return err
+		}
+
+		patches := createPatches(matchingMap, patchTemplate)
+
+		err = applyPatches(m, p, patches)
+
+		if err != nil {
+			return err
+		}
 	}
 
-	matchingMap := getMatchingResources(m, p.Target)
-	if matchingMap.Size() < 1 {
-		return fmt.Errorf("0 resources matching %v", p.Target)
-	}
-
-	patchTemplate, err := loadPatchTemplate(p)
-
-	if err != nil {
-		return err
-	}
-
-	patches := createPatches(matchingMap, patchTemplate)
-
-	return applyPatches(m, p, patches)
+	return nil
 }
 
 func getMatchingResources(m resmap.ResMap, target PatchTarget) resmap.ResMap {
@@ -154,14 +164,14 @@ func createPatches(m resmap.ResMap, patchTemplate *resource.Resource) []*resourc
 	return patches
 }
 
-func loadPatchTemplate(p *plugin) (*resource.Resource, error) {
-	patchResources, err := p.rf.RF().SliceFromPatches(p.ldr, []types.PatchStrategicMerge{types.PatchStrategicMerge(p.Path)})
+func loadPatchTemplate(p *plugin, patch Patch) (*resource.Resource, error) {
+	patchResources, err := p.rf.RF().SliceFromPatches(p.ldr, []types.PatchStrategicMerge{types.PatchStrategicMerge(patch.Path)})
 	if err != nil {
 		return nil, err
 	}
 
 	if len(patchResources) != 1 {
-		return nil, errors.New(fmt.Sprintf("Expected to find 1 resource in file \"%s\", found %d", p.Path, len(patchResources)))
+		return nil, errors.New(fmt.Sprintf("Expected to find 1 resource in file \"%s\", found %d", patch.Path, len(patchResources)))
 	}
 
 	return patchResources[0], nil
